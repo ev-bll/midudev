@@ -1,0 +1,305 @@
+<title>Arkanoid en JavaScript</title>
+
+<style>
+    body {
+        background-color: #19142b;
+        display: grid;
+        place-content: center;
+    }
+
+    canvas {
+        border: 4px solid #fff;
+        border-bottom: transparent;
+        background: url(./bkg.png) repeat;
+        margin: 0 auto;
+        display: block;
+        box-shadow: 0px 0px 20px 0px rgba(0, 0, 0, 0.4);
+    }
+</style>
+
+<canvas></canvas>
+
+<img hidden id="sprite" src="./sprite.png" alt="Sprite Arkanoid"/> <!-- hidden -> CSS display: "none" --->
+<img hidden id="bricks" src="./bricks.png" alt="Sprite Bricks Arkanoid"/>
+
+<script>
+    const canvas = document.querySelector('canvas')
+    const ctx = canvas.getContext('2d') // permite renderizar en 2D dentro del <canvas>
+
+    const $sprite = document.querySelector('#sprite')
+    const $bricks = document.querySelector('#bricks')
+    
+    // medidas del <canvas>
+    canvas.width = 448
+    canvas.height = 400
+
+    // VARIABLES DEL JUEGO --------------------
+
+    // variables de la pelota
+    const ballRadius = 3
+    let x = canvas.width / 2 // posición x
+    let y = canvas.height - 30 // posición y
+    let dx = 3 // dirección x
+    let dy = -3 // dirección y
+
+    // variables de la paleta
+    const paddleHeight = 10
+    const paddleWidth = 50
+    let paddleX = (canvas.width - paddleWidth) / 2 // posición x de la paleta -> para centrar la paleta, calculamos la mitad del [ancho del canvas menos el ancho de la paleta]
+    let paddleY = canvas.height - paddleHeight - 10 //  posición y de la paleta -> calculamos la altura del canvas menos la altura de la paleta menos 10 (para que no quede abajo del todo)
+    let rightPressed = false // tecla derecha pulsada
+    let leftPressed = false // tecla izquierda pulsada
+    const PADDLE_SENSITIVITY = 8 // velocidad de la paleta
+
+    // variables de los ladrillos
+    const brickRowCount = 6 // cantidad de filas de ladrillos
+    const brickColumnCount = 13 // cantidad de columnas de ladrillos
+    const brickWidth = 32 // ancho de cada ladrillo
+    const brickHeight = 16 // altura de cada ladrillo
+    const brickPadding = 0 // separación entre ladrillos
+    const brickOffsetTop = 80 // separación de los ladrillos en la parte superior
+    const brickOffsetLeft = 16 // separación de los ladrillos en el lado izquierdo
+    const bricks = [] // array donde se almacenan todos los ladrillos
+    const BRICK_STATUS = { // definir estado del ladrillo -> si no está roto 1, si está roto 0
+        ACTIVE: 1,
+        DESTROYED: 0
+    }
+
+    for (let c = 0; c < brickColumnCount; c++) { // número de columnas
+        bricks[c] = [] // inicializamos con un array vacío
+        for (let r = 0; r < brickRowCount; r++) {
+
+            // calcular la posición de cada ladrillo en la pantalla
+            const brickX = c * (brickWidth + brickPadding) + brickOffsetLeft // posición x -> cada ladrillo se renderiza en la posición brickWidth + padding multiplicado por el contador, y después se le suma el offset izquierdo
+            const brickY = r * (brickHeight + brickPadding) + brickOffsetTop // posición y -> cada ladrillo se renderiza en la posición brickHeight + padding multiplicado por el contador, y después se le suma el offset superior
+
+            // asignar un color aleatorio a cada ladrillo
+            const random = Math.floor(Math.random() * 8) // número aleatorio del 0 al 7
+
+            // guardar la información de cada ladrillo
+            bricks[c][r] = {
+                x: brickX,
+                y: brickY,
+                status: BRICK_STATUS.ACTIVE,
+                color: random
+            }
+
+        }
+    }
+
+    // ----------------------------------------
+
+    function drawBall() {
+        ctx.beginPath() // indicamos que empezamos a dibujar
+        ctx.arc(x, y, ballRadius, 0, Math.PI * 2) // dibujar un arco para hacer la pelota. Se necesitan las coordenadas de dónde estará ubicada la pelota "x, y", el radio de la pelota "ballRadius", y los ángulos de inicio y final "0 y Math.PI * 2")
+        ctx.fillStyle = '#fff' // color de la pelota
+        ctx.fill() // indicamos que rellene
+        ctx.closePath() // ayuda a optimizar rendimiento y mezclar con otros trazados
+    }
+
+    function drawPaddle() {
+
+        // dibujar la imagen de la pala
+        ctx.drawImage(
+            $sprite, // la imagen
+            29, // clipX -> coordenada x de recorte de la imagen
+            174, // clipY -> coordenada y de recorte de la imagen
+            paddleWidth, // anchura del recorte
+            paddleHeight, // altura del recorte
+            paddleX, // coordenada x del canvas donde se posiciona la imagen recortada
+            paddleY, // coordenada y del canvas donde se posiciona la imagen recortada
+            paddleWidth, // anchura de la imagen recortada
+            paddleHeight // altura de la imagen recortada
+        )
+    }
+
+    function drawBricks() {
+        for (let c = 0; c < brickColumnCount; c++) {
+            for (let r = 0; r < brickRowCount; r++) {
+                const currentBrick = bricks[c][r] // recuperar el ladrillo actual
+                if (currentBrick.status === BRICK_STATUS.DESTROYED) continue // el código salta a la siguiente iteración
+
+                const clipX = currentBrick.color * 32 // posición x de recorte de la imagen -> como cada brick tiene un ancho de 32px, multiplicamos el índice del ladrillo x 32
+                
+                // dibujar cada ladrillo
+                ctx.drawImage(
+                    $bricks,
+                    clipX,
+                    0,
+                    brickWidth,
+                    brickHeight,
+                    currentBrick.x,
+                    currentBrick.y,
+                    brickWidth,
+                    brickHeight
+                )
+                    
+            }
+        }
+    }
+
+    function collisionDetection() {
+        for (let c = 0; c < brickColumnCount; c++) {
+            for (let r = 0; r < brickRowCount; r++) {
+                const currentBrick = bricks[c][r] // recuperar el ladrillo actual
+                if (currentBrick.status === BRICK_STATUS.DESTROYED) continue // el código salta a la siguiente iteración
+                
+                // calcular si la pelota está en la misma coordenada x que el ladrillo
+                const isBallSameXAsBrick =
+                    x > currentBrick.x &&
+                    x < currentBrick.x + brickWidth
+                
+                // calcular si la pelota está en la misma coordenada y que el ladrillo
+                const isBallSameYAsBrick =
+                    y > currentBrick.y &&
+                    y < currentBrick.y + brickHeight
+
+                // detectar colisión de la pelota con el ladrillo
+                if (isBallSameXAsBrick && isBallSameYAsBrick) {
+                    dy = -dy
+                    currentBrick.status = BRICK_STATUS.DESTROYED // cambiar el estado del ladrillo a destruido
+                }
+            }
+        }
+    }
+
+    function drawUI() {
+        ctx.fillText(`FPS: ${framesPerSec}`, 5, 10)
+    }
+
+    function ballMovement() {
+
+        // rebotar la pelota en los laterales
+        if (
+            x + dx > canvas.width - ballRadius || // pared derecha -> posición de x es más grande que el ancho total del canvas (posición derecha) menos el radio de la pelota
+            x + dx < ballRadius // pared izquierda -> posición de x es más pequeña que 0 (posición izquierda) + el radio de la pelota
+        ) {
+            dx = -dx // invertir dirección x
+        }
+
+        // rebotar la pelota en la parte de arriba
+        if (y + dy < ballRadius) { // posición de y es más pequeña que 0 (posición top) + el radio de la pelota
+            dy = -dy // invertir dirección y
+        }
+
+        // calcular si la pelota está en la misma coordenada x que la paleta
+        const isBallSameXAsPaddle =
+            x > paddleX &&
+            x < paddleX + paddleWidth
+
+        // calcular si la pelota está tocando la paleta
+        const isBallTouchingPaddle = y + dy > paddleY
+
+        // la pelota toca la paleta
+        if (isBallSameXAsPaddle && isBallTouchingPaddle) {
+            dy = -dy // invertir dirección y
+        }
+
+        // la pelota toca el suelo -> game over
+        else if (y + dy > canvas.height - ballRadius || y + dy > paddleY + paddleHeight) { // posición de y es más grande que el alto total del canvas (posición bottom) menos el radio de la pelota
+            gameOver = true
+            console.log('Game over!')
+            document.location.reload() // reinicio
+        }
+
+        // sumar velocidad a la posición de la pelota para que se mueva
+        x += dx
+        y += dy
+    }
+
+    // movimiento en el eje X de la paleta
+    function paddleMovement() {
+        if (rightPressed && paddleX < canvas.width - paddleWidth) { // tiene en cuenta no pasar la pared de la derecha
+            paddleX += PADDLE_SENSITIVITY
+        } else if (leftPressed && paddleX > 0) { // tiene en cuenta no pasar la pared de la izquierda
+            paddleX -= PADDLE_SENSITIVITY
+        }
+    }
+
+    function cleanCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height) // limpiar de la posición (0, 0) a la posisión (canvas.width, canvas.height), es decir, todo el canvas
+    }
+
+    // iniciar eventos y actualizar variables
+    function initEvents() {
+        document.addEventListener('keydown', keyDownHandler) // cuando el usuario presiona una tecla
+        document.addEventListener('keyup', keyUpHandler) // cuando el usuario suelta una tecla
+
+        // detectar que se está presionando una tecla
+        function keyDownHandler(event) {
+            const { key } = event // desestructuración de objetos -> extraemos específicamente la propiedad key del objeto event y almacenarla en una constante llamada key. Se evita redundancia: no se necesita repetir event.key, solo se usa key
+            if (key === 'Right' || key === 'ArrowRight') {
+                rightPressed = true
+            } else if (key === 'Left' || key === 'ArrowLeft') {
+                leftPressed = true
+            }
+        }
+
+        // detectar que se está soltando una tecla
+        function keyUpHandler(event) {
+            const { key } = event // desestructuración de objetos -> extraemos específicamente la propiedad key del objeto event y almacenarla en una constante llamada key. Se evita redundancia: no se necesita repetir event.key, solo se usa key
+            if (key === 'Right' || key === 'ArrowRight') {
+                rightPressed = false
+            } else if (key === 'Left' || key === 'ArrowLeft') {
+                leftPressed = false
+            }
+        }
+    }
+    
+    // a qué velocidad de FPS queremos que renderice el juego
+    const fps = 60
+
+    let msPrev = window.performance.now()
+    let msFPSPrev = window.performance.now() + 1000;
+    const msPerFrame = 1000 / fps
+    let frames = 0
+    let framesPerSec = fps;
+
+    let gameOver = false;
+
+    function draw() {
+        if (gameOver) return
+        
+        window.requestAnimationFrame(draw)
+
+        const msNow = window.performance.now()
+        const msPassed = msNow - msPrev
+
+        if (msPassed < msPerFrame) return
+
+        const excessTime = msPassed % msPerFrame
+        msPrev = msNow - excessTime
+
+        frames++
+
+        if (msFPSPrev < msNow) {
+            msFPSPrev = window.performance.now() + 1000
+            framesPerSec = frames;
+            frames = 0;
+        }
+    }
+
+    // loop infinito, base para cualquier videojuego
+    function draw () {
+
+        // limpiar el frame anterior para que no se acumulen en pantalla
+        cleanCanvas()
+        
+        // dibujar los elementos
+        drawBall()
+        drawPaddle()
+        drawBricks()
+        drawUI()
+
+        // colisiones y movimientos
+        collisionDetection()
+        ballMovement()
+        paddleMovement()
+
+        window.requestAnimationFrame(draw) // La función se llama a sí misma y se ejecuta justo antes de que se repinte la ventana. Normalmente se ejecuta 60 veces por cada segundo (60Hz de la pantalla). Está más optimizado que otros métodos.
+    }
+
+    draw()
+    initEvents()
+    
+</script>
